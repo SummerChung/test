@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>合約自動化生成</title>
+    
+    <script src="https://unpkg.com/pizzip@3.1.4/dist/pizzip.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.37.11/docxtemplater.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/1.3.8/FileSaver.min.js"></script>
+    
+    <!-- ★ 1. 環境模擬：這是最關鍵的一步 ★ -->
+    <script>
+        // 模擬 Node.js 的 require，讓套件不會報錯
+        window.require = function(name) {
+            if (name === 'fs') {
+                return {
+                    readFileSync: function() { return ""; },
+                    existsSync: function() { return true; }
+                };
+            }
+            if (name === 'path') {
+                return {
+                    resolve: function() { return ""; },
+                    dirname: function() { return ""; },
+                    sep: '/'
+                };
+            }
+            return {};
+        };
+    </script>
+    
+    <!-- ★ 2. 載入 ImageModule (使用 unpkg 的 build 版本) ★ -->
+    <script src="https://unpkg.com/docxtemplater-image-module-free@1.1.1/build/image-module.js"></script>
+
+    <!-- 引入外部銀行資料庫 -->
+    <script src="banks.js"></script>
+
+    <style>
+        body { font-family: "Microsoft JhengHei", sans-serif; background-color: #f4f4f4; padding: 20px; }
+        .container { max-width: 950px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        h2 { border-bottom: 2px solid #333; padding-bottom: 10px; }
+        h3 { color: #0056b3; margin-top: 25px; margin-bottom: 10px; }
+        
+        .page { display: none; }
+        .page.active { display: block; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: bold; margin-bottom: 5px; }
+        
+        /* 輸入框與選單樣式 */
+        input[type="text"], input[type="number"], select, textarea { 
+            width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 16px; 
+        }
+        
+        input[type="radio"], input[type="checkbox"] {
+            width: auto; margin-right: 8px; transform: scale(1.2); cursor: pointer;
+        }
+
+        select.inline-select { width: auto; padding: 4px; margin: 0 5px; }
+        .row { display: flex; gap: 10px; } .col { flex: 1; }
+        .btn-group { margin-top: 20px; text-align: right; }
+        
+        button { padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button.secondary { background-color: #6c757d; } button.success { background-color: #28a745; }
+        
+        /* 表格樣式 */
+        .table-input { width: 100%; border-collapse: collapse; margin-bottom: 15px; table-layout: fixed; }
+        .table-input th, .table-input td { border: 1px solid #ddd; padding: 8px; text-align: center; vertical-align: middle; }
+        .table-input th { background-color: #f8f9fa; font-weight: bold; color: #333; }
+        .table-input input { text-align: center; }
+
+        .checkbox-group-row { display: flex; align-items: center; gap: 25px; }
+        .checkbox-group-col { display: flex; flex-direction: column; gap: 12px; }
+        .checkbox-group-row label, .checkbox-group-col label { display: flex; align-items: center; font-weight: normal; cursor: pointer; margin: 0; }
+
+        .hidden { display: none; }
+        .indent { margin-left: 28px; margin-top: 5px; border-left: 2px solid #eee; padding-left: 10px; } 
+        .required-mark { color: red; margin-left: 3px; }
+
+        /* 新增：銀行代碼與選單的並排樣式 */
+        .code-select-group { display: flex; gap: 5px; }
+        .code-input { flex: 1; min-width: 60px; } /* 代碼輸入框較窄 */
+        .name-select { flex: 3; } /* 名稱選單較寬 */
+
+        /* 圖片預覽樣式 */
+        #imgPreview {
+            max-width: 200px;
+            max-height: 150px;
+            margin-top: 10px;
+            border: 1px solid #ddd;
+            padding: 5px;
+            display: none; /* 預設隱藏 */
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>合約自動化生成</h1>
+    
+    <!-- 第一頁 -->
+    <div id="page1" class="page active">
+        <h2>步驟 1/2：基本資料與費用</h2>
+        
+        <h3>1. 合約類型</h3>
+        <div class="form-group">
+            <div class="checkbox-group-row">
+                <label><input type="radio" name="contractType" value="new"> 新簽約</label>
+                <label><input type="radio" name="contractType" value="renew" checked> 續約</label>
+            </div>
+        </div>
+
+        <h3>2. 合約期間 <span class="required-mark">*</span></h3>
+        <div class="row">
+            <div class="col">
+                <label>起始日期</label>
+                <div class="row">
+                    <select id="startYear" onchange="calcDuration()"><option value="">年</option></select>
+                    <select id="startMonth" onchange="calcDuration()"><option value="">月</option></select>
+                    <select id="startDay" onchange="calcDuration()"><option value="">日</option></select>
+                </div>
+            </div>
+            <div class="col">
+                <label>結束日期</label>
+                <div class="row">
+                    <select id="endYear" onchange="calcDuration()"><option value="">年</option></select>
+                    <select id="endMonth" onchange="calcDuration()"><option value="">月</option></select>
+                    <select id="endDay" onchange="calcDuration()"><option value="">日</option></select>
+                </div>
+            </div>
+        </div>
+        <div class="form-group"><label>期間計算結果</label><input type="text" id="durationResult" readonly style="background:#e9ecef;"></div>
+        <div class="form-group">
+            <label>封底日期 <span style="color:blue;font-weight:bold;">(預設今日)</span></label>
+            <div class="row" style="max-width:400px;"><select id="coverYear"></select><select id="coverMonth"></select><select id="coverDay"></select></div>
+        </div>
+
+        <h3>3. 基本資料</h3>
+        <div class="row"><div class="col"><label>社區名稱 <span class="required-mark">*</span></label><input type="text" id="commName" required></div><div class="col"><label>地址 <span class="required-mark">*</span></label><input type="text" id="commAddr" required></div></div>
+        <div class="row"><div class="col"><label>乙方 <span class="required-mark">*</span></label><input type="text" id="partyB" required></div><div class="col"><label>代表人 <span class="required-mark">*</span></label><input type="text" id="repName" required></div></div>
+        <div class="row"><div class="col"><label>電話 <span class="required-mark">*</span></label><input type="text" id="phone" required></div><div class="col"><label>統一編號</label><input type="text" id="taxId"></div></div>
+
+        <h3>4. 設備與費用 <span class="required-mark">*</span></h3>
+        <table class="table-input">
+            <thead>
+                <tr>
+                    <th width="20%">項目</th>
+                    <th width="15%">數量</th>
+                    <th width="25%">位置</th>
+                    <th width="15%">單價</th>
+                    <th width="25%">小計</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>社區EIP聯網機</td>
+                    <td><input type="number" id="qty_eip_net_1" onchange="calcFees()"></td>
+                    <td><input type="text" id="loc_eip_net_1" value="電梯內，壹部電梯安裝壹台設備。"></td>
+                    <td><input type="number" id="price_eip_net_1" onchange="calcFees()"></td>
+                    <td><input type="text" id="sub_eip_net_1" readonly></td>
+                </tr>
+                <tr>
+                    <td>社區EIP聯網機</td>
+                    <td><input type="number" id="qty_eip_net_2" onchange="calcFees()"></td>
+                    <td><input type="text" id="loc_eip_net_2" value="一樓梯廳。"></td>
+                    <td><input type="number" id="price_eip_net_2" onchange="calcFees()"></td>
+                    <td><input type="text" id="sub_eip_net_2" readonly></td>
+                </tr>
+                <tr>
+                    <td>社區EIP公告機</td>
+                    <td><input type="number" id="qty_eip_anno" onchange="calcFees()"></td>
+                    <td><input type="text" id="loc_eip_anno"></td>
+                    <td><input type="number" id="price_eip_anno" onchange="calcFees()"></td>
+                    <td><input type="text" id="sub_eip_anno" readonly></td>
+                </tr>
+                <tr>
+                    <td colspan="4" style="text-align:right;font-weight:bold;">合計(月)</td>
+                    <td><input type="text" id="total_monthly" readonly style="color:red;font-weight:bold;"></td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>5. 匯款資料</h3>
+        <div class="row">
+            <!-- 銀行代碼 + 銀行名稱 -->
+            <div class="col">
+                <label>銀行 (代碼 / 名稱) <span class="required-mark">*</span></label>
+                <div class="code-select-group">
+                    <input type="text" id="bankCode" class="code-input" placeholder="代碼">
+                    <select id="bankName" class="name-select" required>
+                        <option value="">請選擇銀行</option>
+                    </select>
+                </div>
+            </div>
+            <!-- 分行代碼 + 分行名稱 -->
+            <div class="col">
+                <label>分行 (代碼 / 名稱) <span class="required-mark">*</span></label>
+                <div class="code-select-group">
+                    <input type="text" id="branchCode" class="code-input" placeholder="代碼">
+                    <select id="bankBranch" class="name-select" required>
+                        <option value="">請先選擇銀行</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col"><label>戶名 <span class="required-mark">*</span></label><input type="text" id="acctName" required></div>
+            <div class="col"><label>帳號 <span class="required-mark">*</span></label><input type="text" id="acctNum" required></div>
+        </div>
+        <!-- 存摺封面圖片上傳區 -->
+        <div class="row" style="margin-top:15px; border-top: 1px dashed #ccc; padding-top: 15px;">
+            <div class="col">
+                <label>存摺封面 (圖片) 
+                    <span style="font-size:12px;color:#007bff;font-weight:normal;">
+                        (Word 範本請使用 <b>{%passbook_img}</b> 標籤)
+                    </span>
+                </label>
+                <input type="file" id="passbookFile" accept="image/*" onchange="loadPassbookImage(this)">
+                <!-- 預覽圖片 -->
+                <img id="imgPreview" src="" alt="圖片預覽">
+            </div>
+        </div>
+        
+        <div class="btn-group">
+            <button onclick="nextPage(2)">下一步 &gt;</button>
+        </div>
+    </div>
+
+    <!-- 第二頁 -->
+    <div id="page2" class="page">
+        <h2>步驟 2/2：條款勾選與生成</h2>
+        
+        <div class="form-group">
+            <label>1. 到期處理方式</label>
+            <div class="checkbox-group-col">
+                <label>
+                    <input type="radio" name="expiryOpt" value="1" checked> 
+                    自動延展 
+                    <select id="renewalYear" class="inline-select" onclick="event.stopPropagation()">
+                        <option value="壹">壹</option>
+                        <option value="貳">貳</option>
+                        <option value="參">參</option>
+                        <option value="肆">肆</option>
+                        <option value="伍">伍</option>
+                    </select> 
+                    年
+                </label>
+                <label>
+                    <input type="radio" name="expiryOpt" value="2"> 須重簽合約
+                </label>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>2. 通知方式</label>
+            <div class="checkbox-group-col">
+                <label><input type="checkbox" id="notify_line"> Line@</label>
+                <label><input type="checkbox" id="notify_paper"> 書面</label>
+                <label><input type="checkbox" id="notify_screen"> 屏幕</label>
+                
+                <label><input type="checkbox" id="notify_email" onchange="toggleEmailInput()"> Email</label>
+                <div id="emailInputArea" class="hidden indent">
+                    <div class="row" style="margin-bottom: 10px;">
+                        <input type="text" id="mail_name_a" placeholder="甲方姓名">
+                        <input type="text" id="mail_addr_a" placeholder="甲方Email">
+                    </div>
+                    <div class="row">
+                        <input type="text" id="mail_name_b" placeholder="乙方姓名">
+                        <input type="text" id="mail_addr_b" placeholder="乙方Email">
+                    </div>
+                </div>
+                
+                <label><input type="checkbox" id="notify_other" onchange="toggleOtherInput()"> 其他</label>
+                <div id="otherInputArea" class="hidden indent"><input type="text" id="other_social_text" placeholder="軟體名稱"></div>
+            </div>
+        </div>
+        
+        <div class="form-group">
+            <label>3. 特別約定事項</label>
+            <div class="checkbox-group-col">
+                <label><input type="radio" name="specialOpt" value="1" checked onchange="toggleSpecialInput()"> 無</label>
+                <label><input type="radio" name="specialOpt" value="2" onchange="toggleSpecialInput()"> 特別約定事項如下：</label>
+            </div>
+            <div id="specialInputArea" class="indent hidden">
+                <textarea id="special_terms_text" rows="5" placeholder="請輸入內容..."></textarea>
+            </div>
+        </div>
+
+        <hr>
+
+        <div class="btn-group">
+            <button class="secondary" onclick="prevPage(1)">&lt; 上一步</button>
+            <button class="success" onclick="generateContract()">生成 Word</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 儲存上傳的圖片資料 (ArrayBuffer)
+    let passbookImgData = null;
+
+    // 預設透明1x1像素圖片 (避免沒上傳時 ImageModule 報錯)
+    const EMPTY_IMAGE_BASE64 = "R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+    
+    function base64ToArrayBuffer(base64) {
+        var binary_string = window.atob(base64);
+        var len = binary_string.length;
+        var bytes = new Uint8Array(len);
+        for (var i = 0; i < len; i++) {
+            bytes[i] = binary_string.charCodeAt(i);
+        }
+        return bytes.buffer;
+    }
+    const EMPTY_IMAGE_BUFFER = base64ToArrayBuffer(EMPTY_IMAGE_BASE64);
+
+    // 1. 初始化
+    window.onload = function() { 
+        initDateSelects(); 
+        setDefaultCoverDate(); 
+        calcFees();
+        initBankUI(); // 初始化銀行選單邏輯
+    };
+
+    // 2. 圖片讀取邏輯
+    function loadPassbookImage(input) {
+        const preview = document.getElementById('imgPreview');
+        if (input.files && input.files[0]) {
+            // A. 讀取為 ArrayBuffer (給 docxtemplater 用)
+            const readerBuffer = new FileReader();
+            readerBuffer.onload = function(e) {
+                passbookImgData = e.target.result;
+            };
+            readerBuffer.readAsArrayBuffer(input.files[0]);
+
+            // B. 讀取為 DataURL (給預覽圖片用)
+            const readerURL = new FileReader();
+            readerURL.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            readerURL.readAsDataURL(input.files[0]);
+        } else {
+            passbookImgData = null;
+            preview.src = "";
+            preview.style.display = 'none';
+        }
+    }
+
+    // 3. 銀行選單邏輯 (雙向綁定)
+    function initBankUI() {
+        // 直接使用 banks.js 定義的 BANKS_DATA 全域變數
+        if (typeof BANKS_DATA === 'undefined') {
+            console.error("無法載入銀行資料庫 (banks.js)");
+            const bankSelect = document.getElementById('bankName');
+            bankSelect.innerHTML = '<option value="">資料載入失敗</option>';
+            return;
+        }
+        
+        const bankData = BANKS_DATA; // 來自 banks.js
+
+        // --- A. 產生銀行的下拉選單 (Option) ---
+        const bankSelect = document.getElementById('bankName');
+        // 保留第一個 "請選擇銀行"
+        // 依序加入銀行選項
+        bankData.forEach(bank => {
+            const opt = document.createElement('option');
+            opt.value = bank.name; // 值存名稱
+            opt.text = `${bank.code} ${bank.name}`; // 顯示代碼+名稱
+            opt.dataset.code = bank.code; // 暫存代碼在 dataset
+            bankSelect.add(opt);
+        });
+
+        // --- B. 監聽「銀行代碼」輸入框 (Input) ---
+        const bankCodeInput = document.getElementById('bankCode');
+        bankCodeInput.addEventListener('input', function() {
+            const inputCode = this.value.trim();
+            
+            // 名稱或代碼匹配
+            const foundBank = bankData.find(b => b.code === inputCode || b.name.includes(inputCode));
+            
+            if (foundBank) {
+                // 找到對應銀行 -> 自動選取下拉選單
+                bankSelect.value = foundBank.name;
+                updateBranchOptions(foundBank.branches);
+            } else {
+                // 沒找到 -> 下拉選單歸零，清空分行
+                bankSelect.value = "";
+                clearBranchOptions();
+            }
+        });
+
+        // --- C. 監聽「銀行名稱」下拉選單 (Select) ---
+        bankSelect.addEventListener('change', function() {
+            const selectedName = this.value;
+            if (!selectedName) {
+                bankCodeInput.value = "";
+                clearBranchOptions();
+                return;
+            }
+
+            // 反查代碼
+            const foundBank = bankData.find(b => b.name === selectedName);
+            if (foundBank) {
+                bankCodeInput.value = foundBank.code;
+                updateBranchOptions(foundBank.branches);
+            }
+        });
+
+      // --- D. 監聽「分行代碼」輸入框 (Input) ---
+        const branchCodeInput = document.getElementById('branchCode');
+        const branchSelect = document.getElementById('bankBranch');
+
+        branchCodeInput.addEventListener('input', function() {
+            const inputCode = this.value.trim();
+            
+            // 必須先有銀行資料，才能找分行
+            const currentBankName = bankSelect.value;
+            const currentBank = bankData.find(b => b.name === currentBankName);
+            
+            if (currentBank) {
+                const foundBranch = currentBank.branches.find(br => br.code === inputCode || br.name.includes(inputCode));
+                
+                if (foundBranch) {
+                    branchSelect.value = foundBranch.name;
+                } else {
+                    branchSelect.value = "";
+                }
+            }
+        });
+
+        // --- E. 監聽「分行名稱」下拉選單 (Select) ---
+        branchSelect.addEventListener('change', function() {
+            const selectedBranchName = this.value;
+            const currentBankName = bankSelect.value;
+            const currentBank = bankData.find(b => b.name === currentBankName);
+
+            if (currentBank) {
+                const foundBranch = currentBank.branches.find(br => br.name === selectedBranchName);
+                if (foundBranch) {
+                    branchCodeInput.value = foundBranch.code;
+                } else {
+                    branchCodeInput.value = "";
+                }
+            }
+        });
+    }
+
+    // 輔助：更新分行下拉選單
+    function updateBranchOptions(branches) {
+        const branchSelect = document.getElementById('bankBranch');
+        const branchCodeInput = document.getElementById('branchCode');
+        
+        // 清空舊選項
+        branchSelect.innerHTML = '<option value="">請選擇分行</option>';
+        branchCodeInput.value = "";
+
+        branches.forEach(br => {
+            const opt = document.createElement('option');
+            opt.value = br.name;
+            opt.text = `${br.code} ${br.name}`;
+            branchSelect.add(opt);
+        });
+    }
+
+    // 輔助：清空分行相關欄位
+    function clearBranchOptions() {
+        const branchSelect = document.getElementById('bankBranch');
+        const branchCodeInput = document.getElementById('branchCode');
+        branchSelect.innerHTML = '<option value="">請先選擇銀行</option>';
+        branchCodeInput.value = "";
+    }
+
+    /* --- 其他原有功能 (日期、計算、Word生成) --- */
+    function initDateSelects() {
+        const ids = ['start', 'end', 'cover'];
+        ids.forEach(prefix => {
+            const y = document.getElementById(prefix+'Year');
+            const m = document.getElementById(prefix+'Month');
+            const d = document.getElementById(prefix+'Day');
+            
+            // 產生選項
+            for(let i=113; i<=130; i++) y.add(new Option(i, i));
+            for(let i=1; i<=12; i++) m.add(new Option(i<10?'0'+i:i, i<10?'0'+i:i));
+            // 預設先給 31 天 (避免剛載入時沒選項)
+            for(let i=1; i<=31; i++) d.add(new Option(i<10?'0'+i:i, i<10?'0'+i:i));
+
+            // 當「年」或「月」改變時，重新計算「日」的範圍
+            y.addEventListener('change', function() { updateDaysOptions(prefix); });
+            m.addEventListener('change', function() { updateDaysOptions(prefix); });
+        });
+    }
+    // 處理大小月與閏年
+    function updateDaysOptions(prefix) {
+        const yInput = document.getElementById(prefix+'Year');
+        const mInput = document.getElementById(prefix+'Month');
+        const dInput = document.getElementById(prefix+'Day');
+        
+        const yVal = parseInt(yInput.value);
+        const mVal = parseInt(mInput.value);
+        const oldDay = dInput.value; 
+
+        if(!yVal || !mVal) return;
+
+        const daysInMonth = new Date(yVal + 1911, mVal, 0).getDate();
+
+        dInput.innerHTML = '<option value="">日</option>';
+
+        for(let i=1; i<=daysInMonth; i++) {
+            const val = i<10 ? '0'+i : ''+i;
+            dInput.add(new Option(val, val));
+        }
+
+        if(oldDay && parseInt(oldDay) <= daysInMonth) {
+            dInput.value = oldDay;
+        } else {
+            dInput.value = "";
+        }
+        
+        if(prefix !== 'cover' && typeof calcDuration === 'function') {
+            calcDuration();
+        }
+    }
+    function setDefaultCoverDate() {
+        const t = new Date(), y = t.getFullYear()-1911, m = (t.getMonth()+1).toString().padStart(2,'0'), d = t.getDate().toString().padStart(2,'0');
+        const ySel = document.getElementById('coverYear');
+        for(let i=0;i<ySel.options.length;i++) if(ySel.options[i].value==y) { ySel.selectedIndex=i; document.getElementById('coverMonth').value=m; document.getElementById('coverDay').value=d; break; }
+    }
+    function formatMoney(n) { return (n===null||isNaN(n)) ? "0" : n.toLocaleString('en-US'); }
+    function numToChi(n) {
+        const m=['零','壹','貳','參','肆','伍','陸','柒','捌','玖']; n=parseInt(n); if(isNaN(n)||n===0)return "零";
+        let s=""; if(n>=100){s+=m[Math.floor(n/100)]+"佰";n%=100;if(n>0&&n<10)s+="零";} if(n>=10){s+=m[Math.floor(n/10)]+"拾";n%=10;} if(n>0)s+=m[n]; return s;
+    }
+    function loadFile(u,c) { var x=new XMLHttpRequest(); x.open('GET',u,true); x.responseType='arraybuffer'; x.onload=function(){if(this.status===200)c(null,this.response);else c(new Error(this.status));}; x.send(); }
+    
+    function nextPage(p) {
+        if(p===2) {
+            let valid = true;
+            let firstError = null;
+
+            // 驗證基本資料
+            const basicFields = ['commName','commAddr','partyB','repName','phone','bankName','bankBranch','acctName','acctNum'];
+            basicFields.forEach(id => {
+                let e = document.getElementById(id);
+                if(!e.value.trim()){
+                    e.style.border="2px solid red";
+                    valid=false;
+                    if(!firstError) firstError = e;
+                } else {
+                    e.style.border="1px solid #ccc";
+                }
+            });
+
+            // 驗證日期
+            const dateFields = ['startYear','startMonth','startDay','endYear','endMonth','endDay'];
+            dateFields.forEach(id => {
+                let e = document.getElementById(id);
+                if(!e.value) {
+                    e.style.border="2px solid red";
+                    valid = false;
+                    if(!firstError) firstError = e;
+                } else {
+                    e.style.border="1px solid #999"; 
+                }
+            });
+
+            if(!valid){ 
+                alert("請填寫所有必填欄位 (標示 * 紅色框處)"); 
+                if(firstError) firstError.scrollIntoView({behavior:"smooth",block:"center"}); 
+                return; 
+            }
+
+            // 金額驗證
+            const totalMonthlyText = document.getElementById('total_monthly').value; 
+            const totalVal = parseInt(totalMonthlyText.replace(/[^\d]/g, '')) || 0;
+            
+            if (totalVal <= 0) {
+                const userConfirmed = confirm("⚠️ 系統偵測到「合計金額」為 0。\n\n• 按「確定」：忽略警告，繼續前往下一步。\n• 按「取消」：留在本頁檢查或修改。");
+                if (!userConfirmed) {
+                    document.getElementById('total_monthly').scrollIntoView({behavior:"smooth",block:"center"});
+                    return;
+                }
+            }
+        }
+        document.querySelectorAll('.page').forEach(e=>e.classList.remove('active')); document.getElementById('page'+p).classList.add('active'); window.scrollTo(0,0);
+    }
+
+    function prevPage(p) { nextPage(p); }
+    function toggleEmailInput() { document.getElementById('emailInputArea').classList.toggle('hidden', !document.getElementById('notify_email').checked); }
+    function toggleOtherInput() { document.getElementById('otherInputArea').classList.toggle('hidden', !document.getElementById('notify_other').checked); }
+    function toggleSpecialInput() { document.getElementById('specialInputArea').classList.toggle('hidden', !document.querySelector('input[name="specialOpt"][value="2"]').checked); }
+
+    function calcDuration() {
+        const sY=parseInt(document.getElementById('startYear').value), sM=parseInt(document.getElementById('startMonth').value), sD=parseInt(document.getElementById('startDay').value);
+        const eY=parseInt(document.getElementById('endYear').value), eM=parseInt(document.getElementById('endMonth').value), eD=parseInt(document.getElementById('endDay').value);
+        if(!sY||!sM||!sD||!eY||!eM||!eD) return;
+        let start=new Date(sY+1911,sM-1,sD), end=new Date(eY+1911,eM-1,eD), dEnd=new Date(end); dEnd.setDate(dEnd.getDate()+1);
+        let ys=dEnd.getFullYear()-start.getFullYear(), ms=dEnd.getMonth()-start.getMonth(), ds=dEnd.getDate()-start.getDate();
+        if(ds<0){ ms--; ds+=new Date(dEnd.getFullYear(),dEnd.getMonth(),0).getDate(); } if(ms<0){ ys--; ms+=12; }
+        document.getElementById('durationResult').value=`共計${numToChi(ys)}年${numToChi(ms)}月${numToChi(ds)}日`;
+    }
+
+    function calcFees() {
+        let q1=parseInt(document.getElementById('qty_eip_net_1').value)||0, p1=parseInt(document.getElementById('price_eip_net_1').value)||0, s1=q1*p1;
+        let q2=parseInt(document.getElementById('qty_eip_net_2').value)||0, p2=parseInt(document.getElementById('price_eip_net_2').value)||0, s2=q2*p2;
+        let q3=parseInt(document.getElementById('qty_eip_anno').value)||0, p3=parseInt(document.getElementById('price_eip_anno').value)||0, s3=q3*p3;
+        
+        document.getElementById('sub_eip_net_1').value="NT$"+formatMoney(s1); 
+        document.getElementById('sub_eip_net_2').value="NT$"+formatMoney(s2);
+        document.getElementById('sub_eip_anno').value=q3===0?"N/A":"NT$"+formatMoney(s3);
+        document.getElementById('total_monthly').value="NT$"+formatMoney(s1+s2+s3);
+    }
+
+    function generateContract() {
+        loadFile("./template.docx", function(err, content) {
+            if(err) { alert("無法讀取 template.docx"); return; }
+            try {
+                // --- ★ 關鍵修正：從 window.ImageModule 或 window.ImageModule.default 取得建構函式 ★ ---
+                let ImageModule = window.ImageModule;
+                
+                // 如果是物件，嘗試取得預設匯出
+                if (typeof ImageModule !== 'function' && ImageModule) {
+                    if (ImageModule.default) {
+                        ImageModule = ImageModule.default;
+                    }
+                }
+
+                if (typeof ImageModule !== 'function') {
+                    console.error("Window.ImageModule is:", window.ImageModule);
+                    alert("ImageModule 載入異常，請重新整理頁面或更換瀏覽器。");
+                    return;
+                }
+                // ----------------------------------------
+
+                const zip = new PizZip(content);
+                
+                // 設定圖片模組
+                const imageOpts = {
+                    centered: false,
+                    getImage: function(tagValue, tagName) {
+                        return tagValue || EMPTY_IMAGE_BUFFER; 
+                    },
+                    getSize: function(img, tagValue, tagName) {
+                        // 如果是空的(透明)圖片，回傳 1x1 像素
+                        if (tagValue === EMPTY_IMAGE_BUFFER) return [1, 1];
+                        // 否則固定大小 (寬 500px, 高 300px)
+                        return [500, 300]; 
+                    }
+                };
+                
+                // 初始化 docxtemplater 並掛載圖片模組
+                const doc = new window.docxtemplater(zip, { 
+                    modules: [new ImageModule(imageOpts)],
+                    paragraphLoop: true, 
+                    linebreaks: true 
+                });
+                
+                const isRenew = document.querySelector('input[name="contractType"]:checked').value === 'renew';
+                const CHECKED="☑", UNCHECKED="☒";
+                
+                const q1=parseInt(document.getElementById('qty_eip_net_1').value)||0, p1=parseInt(document.getElementById('price_eip_net_1').value)||0;
+                const q2=parseInt(document.getElementById('qty_eip_net_2').value)||0, p2=parseInt(document.getElementById('price_eip_net_2').value)||0;
+                const q3=parseInt(document.getElementById('qty_eip_anno').value)||0, p3=parseInt(document.getElementById('price_eip_anno').value)||0;
+                const sub1=q1*p1, sub2=q2*p2, sub3=q3*p3, totalNet=q1+q2, totalFee=sub1+sub2+sub3;
+                
+                let avgPrice = 0;
+                if (totalNet > 0) {
+                    avgPrice = Math.round((sub1 + sub2) / totalNet);
+                }
+                let priceNetStr = "NT$" + formatMoney(avgPrice);
+
+                let specialText = "";
+                if(document.querySelector('input[name="specialOpt"][value="2"]').checked) {
+                    specialText = (document.getElementById('special_terms_text').value||"").replace(/(\r\n|\n|\r)/gm, "\n").trim();
+                }
+
+                const finalBankName = document.getElementById('bankName').value;
+                const finalBranchName = document.getElementById('bankBranch').value;
+
+                // 準備渲染資料
+                const renderData = {
+                    check_new: isRenew?UNCHECKED:CHECKED, check_renew: isRenew?CHECKED:UNCHECKED,
+                    start_year: document.getElementById('startYear').value, start_month: document.getElementById('startMonth').value, start_day: document.getElementById('startDay').value,
+                    end_year: document.getElementById('endYear').value, end_month: document.getElementById('endMonth').value, end_day: document.getElementById('endDay').value,
+                    duration_str: document.getElementById('durationResult').value,
+                    cover_year: document.getElementById('coverYear').value, cover_month: document.getElementById('coverMonth').value, cover_day: document.getElementById('coverDay').value,
+                    comm_name: document.getElementById('commName').value, comm_addr: document.getElementById('commAddr').value,
+                    party_b: document.getElementById('partyB').value, rep_name: document.getElementById('repName').value,
+                    phone: document.getElementById('phone').value, tax_id: document.getElementById('taxId').value,
+                    
+                    bank_info: finalBankName + "-" + finalBranchName,
+                    acct_name: document.getElementById('acctName').value, acct_num: document.getElementById('acctNum').value,
+                    
+                    // 圖片資料 (若無上傳，使用透明圖片)
+                    passbook_img: passbookImgData || EMPTY_IMAGE_BUFFER,
+
+                    qty_total_net: totalNet, qty_total_net_chi: totalNet===0?"零":numToChi(totalNet),
+                    qty_net_1_chi: q1===0?"N/A":numToChi(q1), loc_net_1: document.getElementById('loc_eip_net_1').value,
+                    qty_net_2_chi: q2===0?"N/A":numToChi(q2), loc_net_2: document.getElementById('loc_eip_net_2').value,
+                    qty_anno_chi: q3===0?"N/A":numToChi(q3), loc_anno: document.getElementById('loc_eip_anno').value,
+                    
+                    qty_fee_net_chi: totalNet===0?"N/A":numToChi(totalNet), price_fee_net: priceNetStr, sub_fee_net: "NT$"+formatMoney(sub1+sub2),
+                    qty_fee_anno_chi: q3===0?"N/A":numToChi(q3), price_fee_anno: q3===0?"N/A":"NT$"+formatMoney(p3), sub_fee_anno: q3===0?"N/A":"NT$"+formatMoney(sub3),
+                    total_monthly: "NT$"+formatMoney(totalFee),
+
+                    check_expiry_1: document.querySelector('input[name="expiryOpt"][value="1"]').checked?CHECKED:UNCHECKED,
+                    check_expiry_2: document.querySelector('input[name="expiryOpt"][value="2"]').checked?CHECKED:UNCHECKED,
+                    renewal_year_chi: document.getElementById('renewalYear').value,
+                    
+                    check_notify_line: document.getElementById('notify_line').checked?CHECKED:UNCHECKED,
+                    check_notify_paper: document.getElementById('notify_paper').checked?CHECKED:UNCHECKED,
+                    check_notify_screen: document.getElementById('notify_screen').checked?CHECKED:UNCHECKED,
+                    check_notify_email: document.getElementById('notify_email').checked?CHECKED:UNCHECKED,
+                    check_notify_other: document.getElementById('notify_other').checked?CHECKED:UNCHECKED,
+                    mail_name_a: document.getElementById('mail_name_a').value, mail_addr_a: document.getElementById('mail_addr_a').value,
+                    mail_name_b: document.getElementById('mail_name_b').value, mail_addr_b: document.getElementById('mail_addr_b').value,
+                    other_social_app: document.getElementById('other_social_text').value,
+
+                    check_special_1: document.querySelector('input[name="specialOpt"][value="1"]').checked?CHECKED:UNCHECKED,
+                    check_special_2: document.querySelector('input[name="specialOpt"][value="2"]').checked?CHECKED:UNCHECKED,
+                    special_terms_text: specialText
+                };
+
+                doc.render(renderData);
+
+                saveAs(doc.getZip().generate({type:"blob",mimeType:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"}), "合約_"+document.getElementById('commName').value+".docx");
+            } catch(e) { console.error(e); alert("生成失敗:"+e.message); }
+        });
+    }
+</script>
+</body>
+</html>
