@@ -1,0 +1,5 @@
+{
+  "name": "Contract Generator with Image Support",
+  "description": "合約自動化生成工具，支援外部銀行資料庫與存摺圖片插入功能。",
+  "requestFramePermissions": []
+}
