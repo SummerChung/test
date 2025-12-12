@@ -1,0 +1,69 @@
+    // 3. 銀行選單邏輯
+    function initBankUI() {
+        // 優先從 window.BANKS_DATA 取得資料，確保即使全域變數未自動對應也能讀取
+        const data = (typeof window.BANKS_DATA !== 'undefined' ? window.BANKS_DATA : null) || (typeof BANKS_DATA !== 'undefined' ? BANKS_DATA : null);
+
+        if (!data) {
+            console.error("無法載入銀行資料庫 (banks.js)");
+            const bankSelect = document.getElementById('bankName');
+            bankSelect.innerHTML = '<option value="">資料載入失敗 (banks.js)</option>';
+            return;
+        }
+        
+        const bankData = data;
+        const bankSelect = document.getElementById('bankName');
+        const bankCodeInput = document.getElementById('bankCode');
+        const branchCodeInput = document.getElementById('branchCode');
+        const branchSelect = document.getElementById('bankBranch');
+        
+        bankData.forEach(bank => {
+            const opt = document.createElement('option');
+            opt.value = bank.name;
+            opt.text = `${bank.code} ${bank.name}`;
+            bankSelect.add(opt);
+        });
+
+        bankCodeInput.addEventListener('input', function() {
+            const val = this.value.trim();
+            const found = bankData.find(b => b.code === val || b.name.includes(val));
+            if (found) {
+                bankSelect.value = found.name;
+                updateBranchOptions(found.branches);
+            } else {
+                bankSelect.value = "";
+                clearBranchOptions();
+            }
+        });
+
+        bankSelect.addEventListener('change', function() {
+            const val = this.value;
+            if(!val) { bankCodeInput.value=""; clearBranchOptions(); return; }
+            const found = bankData.find(b => b.name === val);
+            if(found) {
+                bankCodeInput.value = found.code;
+                updateBranchOptions(found.branches);
+            }
+        });
+
+        branchCodeInput.addEventListener('input', function() {
+            const val = this.value.trim();
+            const bName = bankSelect.value;
+            const bank = bankData.find(b => b.name === bName);
+            if(bank) {
+                const br = bank.branches.find(b => b.code === val || b.name.includes(val));
+                if(br) branchSelect.value = br.name;
+                else branchSelect.value = "";
+            }
+        });
+
+        branchSelect.addEventListener('change', function() {
+            const val = this.value;
+            const bName = bankSelect.value;
+            const bank = bankData.find(b => b.name === bName);
+            if(bank) {
+                const br = bank.branches.find(b => b.name === val);
+                if(br) branchCodeInput.value = br.code;
+                else branchCodeInput.value = "";
+            }
+        });
+    }
